@@ -6,7 +6,8 @@
         <title>Loading…</title>
         <style><![CDATA[
           html,body{margin:0;width:100%;height:100%;background:#000;color:#9cc6dc;
-            font:600 18px/1.5 system-ui,sans-serif;display:flex;align-items:center;justify-content:center}
+            font:600 18px/1.5 system-ui,sans-serif}
+          #boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
         ]]></style>
       </head>
       <body>
@@ -27,28 +28,41 @@
               return r.text();
             })
             .then(function (html) {
-              // Rewrite relative URLs so main.js etc. still resolve to jsDelivr,
-              // not to the SVG's own origin.
-              var base = TARGET.replace(/\/[^/]*$/, "/");
+              // Parse as real HTML (lenient). NOT xhtml.
               var doc = new DOMParser().parseFromString(html, "text/html");
 
-              // Absolutize relative script/src and link/href before we write.
+              // Absolutize relative URLs so main.js etc. still hit jsDelivr
+              // after document.write resolves them against the SVG's URL.
+              var base = TARGET.replace(/\/[^/]*$/, "/");
+
               Array.prototype.forEach.call(doc.querySelectorAll("script[src]"), function (s) {
                 var src = s.getAttribute("src");
-                if (src && !/^(?:[a-z]+:|\/\/|#)/i.test(src)) s.setAttribute("src", new URL(src, base).href);
+                if (src && !/^(?:[a-z]+:|\/\/|#)/i.test(src)) {
+                  s.setAttribute("src", new URL(src, base).href);
+                }
               });
               Array.prototype.forEach.call(doc.querySelectorAll("link[href]"), function (l) {
                 var href = l.getAttribute("href");
-                if (href && !/^(?:[a-z]+:|\/\/|#)/i.test(href)) l.setAttribute("href", new URL(href, base).href);
+                if (href && !/^(?:[a-z]+:|\/\/|#)/i.test(href)) {
+                  l.setAttribute("href", new URL(href, base).href);
+                }
+              });
+              Array.prototype.forEach.call(doc.querySelectorAll("img[src]"), function (m) {
+                var src = m.getAttribute("src");
+                if (src && !/^(?:[a-z]+:|\/\/|#|data:)/i.test(src)) {
+                  m.setAttribute("src", new URL(src, base).href);
+                }
               });
 
-              // document.open() destroys the current document (SVG and all),
-              // then we write the new HTML as a fresh document.
+              // Nuke the current document (SVG and all) and write the new one.
+              // document.open() replaces the document's root element.
               document.open();
               document.write("<!doctype html>" + doc.documentElement.outerHTML);
               document.close();
             })
-            .catch(function (err) { fail(err && err.message || String(err)); });
+            .catch(function (err) {
+              fail(err && err.message ? err.message : String(err));
+            });
         })();
         /*]]>*/</script>
       </body>
