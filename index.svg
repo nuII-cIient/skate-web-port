@@ -5,49 +5,19 @@
         <meta charset="UTF-8" />
         <title>Loading…</title>
         <style><![CDATA[
-          html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}
-          foreignObject{overflow:visible}
-          #boot{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
-                color:#9cc6dc;font:600 18px/1.5 system-ui,sans-serif;background:#000}
-          #boot.hidden{display:none}
+          html,body{margin:0;width:100%;height:100%;background:#000;color:#9cc6dc;
+            font:600 18px/1.5 system-ui,sans-serif;display:flex;align-items:center;justify-content:center}
         ]]></style>
-        <script>/*<![CDATA[*/
-        (function () {
-          var NS = "http://www.w3.org/1999/xhtml";
-          var root = document.querySelector("foreignObject").firstElementChild;
-
-          var origCE   = document.createElement.bind(document);
-          var origCENS = document.createElementNS.bind(document);
-          var origQS   = document.querySelector.bind(document);
-          var origQSA  = document.querySelectorAll.bind(document);
-
-          Object.defineProperty(document, "head",            { get: function(){ return root.querySelector("head"); }, configurable: true });
-          Object.defineProperty(document, "body",            { get: function(){ return root.querySelector("body"); }, configurable: true });
-          Object.defineProperty(document, "documentElement", { get: function(){ return root; }, configurable: true });
-
-          document.createElement   = function(t,o){ return typeof t === "string" ? origCENS(NS,t,o) : origCE(t,o); };
-          document.createElementNS = function(ns,n,o){ return (!ns || ns === NS) ? origCENS(NS,n,o) : origCENS(ns,n,o); };
-          document.getElementById  = function(id){ return root.querySelector('[id="'+String(id).replace(/["\\]/g,'\\$&')+'"]'); };
-          document.getElementsByTagName   = function(t){ return root.getElementsByTagNameNS(NS,t); };
-          document.getElementsByClassName = function(c){ return root.getElementsByClassName(c); };
-          document.querySelector    = function(s){ try{ return root.querySelector(s) || origQS(s); }catch(e){ return origQS(s); } };
-          document.querySelectorAll = function(s){ try{ var a = root.querySelectorAll(s); return a.length ? a : origQSA(s); }catch(e){ return origQSA(s); } };
-        })();
-        /*]]>*/</script>
       </head>
       <body>
         <div id="boot">Loading…</div>
-
         <script>/*<![CDATA[*/
         (function () {
           var TARGET = "https://cdn.jsdelivr.net/gh/nuII-cIient/skate-web-port@skate/index.html";
           var boot = document.getElementById("boot");
 
           function fail(msg) {
-            if (boot) {
-              boot.classList.remove("hidden");
-              boot.textContent = "Failed to load: " + msg;
-            }
+            if (boot) boot.textContent = "Failed to load: " + msg;
             console.error("[svg-loader]", msg);
           }
 
@@ -57,69 +27,28 @@
               return r.text();
             })
             .then(function (html) {
-              // Wipe everything currently in the SVG document,
-              // including the boot element.
-              while (document.body.firstChild) {
-                document.body.removeChild(document.body.firstChild);
-              }
-
-              // Parse the fetched HTML as XHTML so it can live inside <foreignObject>.
-              // document.write would produce an HTML tree, which is illegal inside SVG.
-              var doc = new DOMParser().parseFromString(html, "application/xhtml+xml");
-              if (doc.querySelector("parsererror")) {
-                throw new Error("fetched HTML is not XHTML-safe");
-              }
-
-              // Import every head child, then every body child, into our document.
-              var head = document.head;
-              var body = document.body;
-
-              Array.prototype.forEach.call(doc.head.children, function (node) {
-                head.appendChild(document.importNode(node, true));
-              });
-              Array.prototype.forEach.call(doc.body.children, function (node) {
-                body.appendChild(document.importNode(node, true));
-              });
-
-              // If the fetched page used <body> attributes (class, style, id),
-              // copy them across too.
-              Array.prototype.forEach.call(doc.body.attributes, function (a) {
-                body.setAttribute(a.name, a.value);
-              });
-
-              // Rewrite <script src> to be absolute against the fetched URL.
-              // Relative scripts inside an XHTML import resolve against the SVG's
-              // own URL, not the fetched page's URL. Fixing this keeps main.js loadable.
+              // Rewrite relative URLs so main.js etc. still resolve to jsDelivr,
+              // not to the SVG's own origin.
               var base = TARGET.replace(/\/[^/]*$/, "/");
-              Array.prototype.forEach.call(body.querySelectorAll("script[src]"), function (s) {
+              var doc = new DOMParser().parseFromString(html, "text/html");
+
+              // Absolutize relative script/src and link/href before we write.
+              Array.prototype.forEach.call(doc.querySelectorAll("script[src]"), function (s) {
                 var src = s.getAttribute("src");
-                if (!src || /^(?:[a-z]+:|\/\/|#)/i.test(src)) return;
-                s.setAttribute("src", new URL(src, base).href);
+                if (src && !/^(?:[a-z]+:|\/\/|#)/i.test(src)) s.setAttribute("src", new URL(src, base).href);
               });
-
-              // Same treatment for <link href> in head (stylesheets, fonts, icons).
-              Array.prototype.forEach.call(head.querySelectorAll("link[href]"), function (l) {
+              Array.prototype.forEach.call(doc.querySelectorAll("link[href]"), function (l) {
                 var href = l.getAttribute("href");
-                if (!href || /^(?:[a-z]+:|\/\/|#)/i.test(href)) return;
-                l.setAttribute("href", new URL(href, base).href);
+                if (href && !/^(?:[a-z]+:|\/\/|#)/i.test(href)) l.setAttribute("href", new URL(href, base).href);
               });
 
-              // Scripts inserted via innerHTML/importNode don't execute.
-              // Re-create them so they run.
-              var stale = body.querySelectorAll("script");
-              Array.prototype.forEach.call(stale, function (old) {
-                var s = document.createElement("script");
-                for (var i = 0; i < old.attributes.length; i++) {
-                  var a = old.attributes[i];
-                  s.setAttribute(a.name, a.value);
-                }
-                if (!s.src) s.textContent = old.textContent;
-                old.parentNode.replaceChild(s, old);
-              });
+              // document.open() destroys the current document (SVG and all),
+              // then we write the new HTML as a fresh document.
+              document.open();
+              document.write("<!doctype html>" + doc.documentElement.outerHTML);
+              document.close();
             })
-            .catch(function (err) {
-              fail(err && err.message ? err.message : String(err));
-            });
+            .catch(function (err) { fail(err && err.message || String(err)); });
         })();
         /*]]>*/</script>
       </body>
